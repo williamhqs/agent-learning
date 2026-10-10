@@ -17,13 +17,63 @@ const ai = new GoogleGenAI({ apiKey });
 const model = process.env.GEMINI_MODEL || "gemini-3-flash-preview";
 
 // 3. 定义工具：获取当前北京时间
-function getCurrentTime(): string {
-  return new Date().toLocaleString("zh-CN", {
-    timeZone: "Asia/Shanghai",
-  });
+function getCurrentTime(): object {
+  return {
+    time: new Date().toLocaleString("zh-CN", {
+      timeZone: "Asia/Shanghai",
+    }),
+  };
 }
 
+function calculate(args: Record<string, unknown>): object {
+  const { a, b, operator } = args;
+
+  if (
+    typeof a !== "number" ||
+    typeof b !== "number" ||
+    !Number.isFinite(a) ||
+    !Number.isFinite(b)
+  ) {
+    throw new Error("计算参数必须是有效数字");
+  }
+
+  switch (operator) {
+    case "add":
+      return { result: a + b };
+
+    case "subtract":
+      return { result: a - b };
+
+    case "multiply":
+      return { result: a * b };
+
+    case "divide":
+      if (b === 0) {
+        throw new Error("除数不能为零");
+      }
+      return { result: a / b };
+
+    default:
+      throw new Error(`不支持的运算：${String(operator)}`);
+  }
+}
+
+const toolRegistry: Record<string, (args: Record<string, unknown>) => object> =
+  {
+    get_current_time: () => getCurrentTime(),
+    calculate,
+  };
+
 // 4. 把工具描述告诉模型
+function executeTool(name: string, args: Record<string, unknown>): object {
+  const tool = toolRegistry[name];
+
+  if (!tool) {
+    throw new Error(`未知工具：${name}`);
+  }
+
+  return tool(args);
+}
 
 const tools = [
   {
@@ -66,55 +116,55 @@ const tools = [
 
 // 5. 程序负责真正执行工具
 
-function executeTool(name: string, args: Record<string, unknown>): object {
-  switch (name) {
-    case "get_current_time":
-      return {
-        time: getCurrentTime(),
-      };
+// function executeTool(name: string, args: Record<string, unknown>): object {
+//   switch (name) {
+//     case "get_current_time":
+//       return {
+//         time: getCurrentTime(),
+//       };
 
-    case "calculate": {
-      const { a, b, operator } = args;
+//     case "calculate": {
+//       const { a, b, operator } = args;
 
-      if (
-        typeof a !== "number" ||
-        typeof b !== "number" ||
-        !Number.isFinite(a) ||
-        !Number.isFinite(b)
-      ) {
-        throw new Error("计算参数必须是有效数字");
-      }
+//       if (
+//         typeof a !== "number" ||
+//         typeof b !== "number" ||
+//         !Number.isFinite(a) ||
+//         !Number.isFinite(b)
+//       ) {
+//         throw new Error("计算参数必须是有效数字");
+//       }
 
-      switch (operator) {
-        case "add":
-          return { result: a + b };
+//       switch (operator) {
+//         case "add":
+//           return { result: a + b };
 
-        case "subtract":
-          return { result: a - b };
+//         case "subtract":
+//           return { result: a - b };
 
-        case "multiply":
-          return { result: a * b };
+//         case "multiply":
+//           return { result: a * b };
 
-        case "divide":
-          if (b === 0) {
-            throw new Error("除数不能为零");
-          }
-          return { result: a / b };
+//         case "divide":
+//           if (b === 0) {
+//             throw new Error("除数不能为零");
+//           }
+//           return { result: a / b };
 
-        default:
-          throw new Error(`不支持的运算：${String(operator)}`);
-      }
-    }
+//         default:
+//           throw new Error(`不支持的运算：${String(operator)}`);
+//       }
+//     }
 
-    default:
-      throw new Error(`未知工具：${name}`);
-  }
-}
+//     default:
+//       throw new Error(`未知工具：${name}`);
+//   }
+// }
 
 // 6. Agent 主流程
 async function main() {
   // const userMessage = "现在北京时间几点了？请查询后回答。";
-//   const userMessage = "请计算 128 乘以 37，再告诉我结果。";
+  //   const userMessage = "请计算 128 乘以 37，再告诉我结果。";
   const userMessage = "先查询现在的北京时间，再计算 128 乘以 37。";
 
   console.log("用户：", userMessage);
