@@ -14,7 +14,54 @@ if (!apiKey) {
 
 const ai = new GoogleGenAI({ apiKey });
 
-const model = process.env.GEMINI_MODEL || "gemini-3-flash-preview";
+const model = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
+
+type ToolDefinition = {
+  name: string;
+  description: string;
+  parameters: {
+    type: "OBJECT";
+    properties: Record<string, unknown>;
+    required?: string[];
+  };
+  execute: (args: Record<string, unknown>) => object;
+};
+
+const toolDefinitions: ToolDefinition[] = [
+  {
+    name: "get_current_time",
+    description: "获取当前的北京时间",
+    parameters: {
+      type: "OBJECT",
+      properties: {},
+    },
+    execute: () => getCurrentTime(),
+  },
+  {
+    name: "calculate",
+    description: "执行两个数字之间的四则运算",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        a: {
+          type: "NUMBER",
+          description: "第一个数字",
+        },
+        b: {
+          type: "NUMBER",
+          description: "第二个数字",
+        },
+        operator: {
+          type: "STRING",
+          enum: ["add", "subtract", "multiply", "divide"],
+          description: "运算类型",
+        },
+      },
+      required: ["a", "b", "operator"],
+    },
+    execute: calculate,
+  },
+];
 
 // 3. 定义工具：获取当前北京时间
 function getCurrentTime(): object {
@@ -58,59 +105,26 @@ function calculate(args: Record<string, unknown>): object {
   }
 }
 
-const toolRegistry: Record<string, (args: Record<string, unknown>) => object> =
-  {
-    get_current_time: () => getCurrentTime(),
-    calculate,
-  };
-
 // 4. 把工具描述告诉模型
 function executeTool(name: string, args: Record<string, unknown>): object {
-  const tool = toolRegistry[name];
+  const tool = toolDefinitions.find((item) => item.name === name);
 
   if (!tool) {
     throw new Error(`未知工具：${name}`);
   }
 
-  return tool(args);
+  return tool.execute(args);
 }
 
 const tools = [
   {
-    functionDeclarations: [
-      {
-        name: "get_current_time",
-        description: "获取当前的北京时间",
-        parameters: {
-          type: "OBJECT",
-          properties: {},
-        },
-      },
-      {
-        name: "calculate",
-        description: "执行两个数字之间的四则运算",
-        parameters: {
-          type: "OBJECT",
-          properties: {
-            a: {
-              type: "NUMBER",
-              description: "第一个数字",
-            },
-            b: {
-              type: "NUMBER",
-              description: "第二个数字",
-            },
-            operator: {
-              type: "STRING",
-              enum: ["add", "subtract", "multiply", "divide"],
-              description:
-                "运算类型：add 加法，subtract 减法，multiply 乘法，divide 除法",
-            },
-          },
-          required: ["a", "b", "operator"],
-        },
-      },
-    ],
+    functionDeclarations: toolDefinitions.map(
+      ({ name, description, parameters }) => ({
+        name,
+        description,
+        parameters,
+      }),
+    ),
   },
 ];
 
@@ -165,7 +179,7 @@ const tools = [
 async function main() {
   // const userMessage = "现在北京时间几点了？请查询后回答。";
   //   const userMessage = "请计算 128 乘以 37，再告诉我结果。";
-  const userMessage = "先查询现在的北京时间，再计算 128 乘以 37。";
+  const userMessage = "10 除以 0";
 
   console.log("用户：", userMessage);
 
@@ -186,7 +200,11 @@ async function main() {
     const response = await ai.models.generateContent({
       model,
       contents,
-      config: { tools },
+      config: {
+        tools,
+        systemInstruction:
+          "你是一个计算助手。凡是用户提出具体的数值计算，都必须调用 calculate 工具，不能直接心算。工具执行失败时，根据工具返回的错误信息回答用户。",
+      },
     });
 
     const modelContent = response.candidates?.[0]?.content;
@@ -213,23 +231,42 @@ async function main() {
         throw new Error("模型返回了没有名称的工具调用");
       }
 
+      const args = (call.args ?? {}) as Record<string, unknown>;
+
       console.log("调用工具：", call.name);
-      console.log("工具参数：", call.args);
+      console.log("工具参数：", args);
 
-      const result = executeTool(
-        call.name,
-        (call.args ?? {}) as Record<string, unknown>,
-      );
+      try {
+        const result = executeTool(call.name, args);
 
-      console.log("工具结果：", result);
+        console.log("工具结果：", result);
 
-      return {
-        functionResponse: {
-          name: call.name,
-          id: call.id,
-          response: result,
-        },
-      };
+        return {
+          functionResponse: {
+            name: call.name,
+            id: call.id,
+            response: {
+              ok: true,
+              result,
+            },
+          },
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "未知工具错误";
+
+        console.error("工具执行失败：", message);
+
+        return {
+          functionResponse: {
+            name: call.name,
+            id: call.id,
+            response: {
+              ok: false,
+              error: message,
+            },
+          },
+        };
+      }
     });
 
     // 把工具结果追加到对话中
