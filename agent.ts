@@ -24,6 +24,7 @@ function getCurrentTime(): string {
 }
 
 // 4. 把工具描述告诉模型
+
 const tools = [
   {
     functionDeclarations: [
@@ -35,17 +36,75 @@ const tools = [
           properties: {},
         },
       },
+      {
+        name: "calculate",
+        description: "执行两个数字之间的四则运算",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            a: {
+              type: "NUMBER",
+              description: "第一个数字",
+            },
+            b: {
+              type: "NUMBER",
+              description: "第二个数字",
+            },
+            operator: {
+              type: "STRING",
+              enum: ["add", "subtract", "multiply", "divide"],
+              description:
+                "运算类型：add 加法，subtract 减法，multiply 乘法，divide 除法",
+            },
+          },
+          required: ["a", "b", "operator"],
+        },
+      },
     ],
   },
 ];
 
 // 5. 程序负责真正执行工具
-function executeTool(name: string): object {
+
+function executeTool(name: string, args: Record<string, unknown>): object {
   switch (name) {
     case "get_current_time":
       return {
         time: getCurrentTime(),
       };
+
+    case "calculate": {
+      const { a, b, operator } = args;
+
+      if (
+        typeof a !== "number" ||
+        typeof b !== "number" ||
+        !Number.isFinite(a) ||
+        !Number.isFinite(b)
+      ) {
+        throw new Error("计算参数必须是有效数字");
+      }
+
+      switch (operator) {
+        case "add":
+          return { result: a + b };
+
+        case "subtract":
+          return { result: a - b };
+
+        case "multiply":
+          return { result: a * b };
+
+        case "divide":
+          if (b === 0) {
+            throw new Error("除数不能为零");
+          }
+          return { result: a / b };
+
+        default:
+          throw new Error(`不支持的运算：${String(operator)}`);
+      }
+    }
 
     default:
       throw new Error(`未知工具：${name}`);
@@ -54,7 +113,9 @@ function executeTool(name: string): object {
 
 // 6. Agent 主流程
 async function main() {
-  const userMessage = "现在北京时间几点了？请查询后回答。";
+  // const userMessage = "现在北京时间几点了？请查询后回答。";
+//   const userMessage = "请计算 128 乘以 37，再告诉我结果。";
+  const userMessage = "先查询现在的北京时间，再计算 128 乘以 37。";
 
   console.log("用户：", userMessage);
 
@@ -105,7 +166,10 @@ async function main() {
       console.log("调用工具：", call.name);
       console.log("工具参数：", call.args);
 
-      const result = executeTool(call.name);
+      const result = executeTool(
+        call.name,
+        (call.args ?? {}) as Record<string, unknown>,
+      );
 
       console.log("工具结果：", result);
 
